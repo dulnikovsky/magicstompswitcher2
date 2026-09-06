@@ -308,6 +308,11 @@ int main(int argc, char* argv[])
         }
         while(snd_seq_event_input(handle, &ev) >= 0) {
             if(ev->type==SND_SEQ_EVENT_SYSEX) {
+                auto msMapIt = msMap.find(ev->source);
+                if( msMapIt == msMap.end()) {
+                    cout << "Unexpected event addess??" << endl;
+                    continue;
+                }
                 auto sysExMapIt = sysExMap.find(ev->data.addr);
                 if(sysExMapIt == sysExMap.end()) {
                     sysExMapIt = sysExMap.insert(std::pair<snd_seq_addr_t, vector<uint8_t>>(ev->data.addr, vector<uint8_t>())).first;
@@ -317,10 +322,6 @@ int main(int argc, char* argv[])
 
                 if( (! sysExDataVecRef.empty()) && sysExDataVecRef.at(0) == 0xF0 && sysExDataVecRef.at(sysExDataVecRef.size()-1) == 0xF7) {
                     if(sysExDataVecRef.size() >= 13 && equal(sysExDataVecRef.cbegin(), sysExDataVecRef.cbegin()+ub99SysExHeaderSize, ub99SysExHeader)) {
-                        auto msMapIt = msMap.find(ev->source);
-                        if( msMapIt == msMap.end()) {
-                            cout << "Unexpected event addess??" << endl;
-                        }
                         int8_t currentPatchInRequest = msMapIt->second.size() / PatchTotalLength;
                         uint8_t checkSum = calcChecksum( & sysExDataVecRef.at(ub99SysExHeaderSize), sysExDataVecRef.size() - ub99SysExHeaderSize-2);
                         if(checkSum == sysExDataVecRef.at(sysExDataVecRef.size()-2)) {
@@ -340,9 +341,9 @@ int main(int argc, char* argv[])
                                     }
                                     const char *firstCharNameAddr = reinterpret_cast<const char *>(&(*(msMapIt->second.cbegin()+(PatchTotalLength*(currentPatchInRequest -1)) + PatchName)));
                                     std::string patchName(firstCharNameAddr, PatchNameLength);
-                                    cout << "Received Patch " << (currentPatchInRequest -1) << " " << patchName << " from Magicstomp at ["
-                                         << static_cast<char>(msMapIt->first.client) << ","
-                                         << static_cast<char>(msMapIt->first.port) << "]" << endl;
+                                    cout << "Received Patch " << static_cast<uint32_t>(currentPatchInRequest) << " " << patchName << " from Magicstomp at ["
+                                         << static_cast<uint32_t>(msMapIt->first.client) << ","
+                                         << static_cast<uint32_t>(msMapIt->first.port) << "]" << endl;
                                 }
                             } else if( sysExDataVecRef.at(8)==0x00 && sysExDataVecRef.at(9)!=0x00) {
                                 uint8_t length = sysExDataVecRef.at(9);
@@ -383,17 +384,17 @@ int main(int argc, char* argv[])
                         subscribePort(handle, selfOutAddr, ev->data.addr);
                         subscribePort(handle, ev->data.addr, selfInAddr);
                         auto retPair = msMap.insert(std::pair<snd_seq_addr_t, vector<uint8_t>>(ev->data.addr, vector<uint8_t>()));
-                        this_thread::sleep_for(chrono::milliseconds(500)); // Wait 1s until MS gets ready after power on
+                        this_thread::sleep_for(chrono::milliseconds(700)); // Wait 1s until MS gets ready after power on
                         requestPatch( retPair.first->second.size(), selfOutAddr, retPair.first->first);
-                        cout << "Magicstomp connected[" << static_cast<unsigned int>(ev->data.addr.client)
-                             << ":" << static_cast<unsigned int>(ev->data.addr.port) << "]" << endl;
+                        cout << "Magicstomp connected[" << static_cast<uint32_t>(ev->data.addr.client)
+                             << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
                     }
                 }
                 else if((snd_seq_port_info_get_type(pinfo) & SND_SEQ_PORT_TYPE_HARDWARE) == SND_SEQ_PORT_TYPE_HARDWARE &&
                          cap & (SND_SEQ_PORT_CAP_READ|SND_SEQ_PORT_CAP_SUBS_READ)) {
                     subscribePort( handle, ev->data.addr, selfInAddr);
-                    cout << "Hardware MIDI IN device connected[" << static_cast<unsigned int>(ev->data.addr.client)
-                         << ":" << static_cast<unsigned int>(ev->data.addr.port) << "]" << endl;
+                    cout << "Hardware MIDI IN device connected[" << static_cast<uint32_t>(ev->data.addr.client)
+                         << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
 
                     if(/*midiThrough*/ 0)
                     {
@@ -406,8 +407,8 @@ int main(int argc, char* argv[])
             }
             else if(ev->type==SND_SEQ_EVENT_PORT_EXIT) {
                 if(msMap.erase(ev->data.addr) == 1) {
-                    cout << "Magicstomp disconnected[" << static_cast<unsigned int>(ev->data.addr.client)
-                         << ":" << static_cast<unsigned int>(ev->data.addr.port) << "]" << endl;
+                    cout << "Magicstomp disconnected[" << static_cast<uint32_t>(ev->data.addr.client)
+                         << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
                 }
                 sysExMap.erase(ev->data.addr);
             }
