@@ -1,5 +1,4 @@
 #include <iostream>
-#include <thread>
 #include <map>
 #include <vector>
 #include <array>
@@ -14,6 +13,7 @@ bool operator < (const snd_seq_addr_t& l, const snd_seq_addr_t& r)
 }
 
 map<snd_seq_addr_t, vector<uint8_t>> msMap;
+int queue;
 uint8_t currentProgram{0};
 snd_seq_t *handle;
 snd_seq_addr_t selfInAddr, selfOutAddr;
@@ -43,6 +43,8 @@ void init()
     selfInAddr.client = selfOutAddr.client = snd_seq_client_id(handle);
     snd_seq_set_client_name(handle, "msswitcher");
 
+    queue = snd_seq_alloc_queue(handle);
+
     selfInAddr.port = snd_seq_create_simple_port(handle, "IN",
                                                       SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE, SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
     selfOutAddr.port = snd_seq_create_simple_port(handle, "OUT",
@@ -53,7 +55,6 @@ void init()
     if(count != 1) {
         cout << "Poll descriptor count higher than 1????" << endl;
     }
-    count = snd_seq_poll_descriptors(handle, &seqPollFd, 1, POLLIN);
     seqPollFd.events = POLLIN;
     seqPollFd.revents = 0;
 
@@ -126,7 +127,7 @@ void scan()
     }
 }
 
-int requestPatch(unsigned char index, const snd_seq_addr_t &src, const snd_seq_addr_t &dest)
+int requestPatch(unsigned char index, const snd_seq_addr_t &src, const snd_seq_addr_t &dest, unsigned int delayNs)
 {
     array<unsigned char, 10> request{0xF0, 0x43, 0x7D, 0x50, 0x55, 0x42, 0x30, 0x01, 0x00, 0xF7};
     request[8] = index;
@@ -135,16 +136,23 @@ int requestPatch(unsigned char index, const snd_seq_addr_t &src, const snd_seq_a
     snd_seq_ev_clear(&sendev);
     snd_seq_ev_set_source(&sendev, src.port);
     snd_seq_ev_set_dest(&sendev, dest.client, dest.port);
-    snd_seq_ev_set_direct(&sendev);
 
     snd_seq_ev_set_variable(&sendev, request.size(), (void *) &request.at(0));
     sendev.type=SND_SEQ_EVENT_SYSEX;
+
+    snd_seq_real_time_t delay_time;
+    delay_time.tv_sec = 0;
+    delay_time.tv_nsec = delayNs;
+
+    snd_seq_ev_schedule_real(&sendev, queue, 1, &delay_time);
 
     int ret;
     ret = snd_seq_event_output(handle, &sendev);
     if( ret <= 0)
         return ret;
+
     ret = snd_seq_drain_output(handle);
+
     return ret;
 }
 
@@ -265,6 +273,16 @@ void sendAllToTemp()
     }
 }
 
+bool hasRequestsPending()
+{
+    for (auto const& [msaddr, dataVector] : msMap) {
+        if(dataVector.size() != PatchTotalLength*numOfPatches) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int main(int argc, char* argv[])
 {
     map<snd_seq_addr_t, vector<uint8_t>> sysExMap;
@@ -290,11 +308,14 @@ int main(int argc, char* argv[])
         }
     }
 
-
     init();
     scan();
+    if(hasRequestsPending()) {
+        snd_seq_start_queue(handle, queue, NULL);
+    }
+
     for (auto const& [msaddr, dataVector] : msMap) {
-        requestPatch(dataVector.size() , selfOutAddr, msaddr);
+        requestPatch(dataVector.size() , selfOutAddr, msaddr, 0);
     }
     while (1) {
 
@@ -336,8 +357,10 @@ int main(int argc, char* argv[])
                                                          msMapIt->second.data() + PatchTotalLength*currentProgram + PatchCommonLength);
 
                                     } else {
-                                        this_thread::sleep_for(chrono::milliseconds(70));
-                                        requestPatch(currentPatchInRequest, selfOutAddr, msMapIt->first);
+                                        requestPatch(currentPatchInRequest, selfOutAddr, msMapIt->first, 70000000);
+                                    }
+                                    if(! hasRequestsPending()) {
+                                        snd_seq_stop_queue(handle, queue, NULL);
                                     }
                                     const char *firstCharNameAddr = reinterpret_cast<const char *>(&(*(msMapIt->second.cbegin()+(PatchTotalLength*(currentPatchInRequest -1)) + PatchName)));
                                     std::string patchName(firstCharNameAddr, PatchNameLength);
@@ -384,8 +407,8 @@ int main(int argc, char* argv[])
                         subscribePort(handle, selfOutAddr, ev->data.addr);
                         subscribePort(handle, ev->data.addr, selfInAddr);
                         auto retPair = msMap.insert(std::pair<snd_seq_addr_t, vector<uint8_t>>(ev->data.addr, vector<uint8_t>()));
-                        this_thread::sleep_for(chrono::milliseconds(700)); // Wait 1s until MS gets ready after power on
-                        requestPatch( retPair.first->second.size(), selfOutAddr, retPair.first->first);
+                        snd_seq_start_queue(handle, queue, NULL);
+                        requestPatch( retPair.first->second.size(), selfOutAddr, retPair.first->first, 700000000);
                         cout << "Magicstomp connected[" << static_cast<uint32_t>(ev->data.addr.client)
                              << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
                     }
@@ -411,6 +434,9 @@ int main(int argc, char* argv[])
                          << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
                 }
                 sysExMap.erase(ev->data.addr);
+                if(! hasRequestsPending()) {
+                    snd_seq_stop_queue(handle, queue, NULL);
+                }
             }
         }
     }
