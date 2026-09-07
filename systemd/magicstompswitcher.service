@@ -1,0 +1,14 @@
+[Unit]
+Description=MagicstompSwitcher
+After=multi-user.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/environment
+ExecStart=/usr/local/bin/magicstompswitcher2
+KillMode=process
+User=pi
+Group=pi
+
+[Install]
+WantedBy=multi-user.target
