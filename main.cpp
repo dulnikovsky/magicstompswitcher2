@@ -55,6 +55,7 @@ void init()
     if(count != 1) {
         cout << "Poll descriptor count higher than 1????" << endl;
     }
+    snd_seq_poll_descriptors(handle, &seqPollFd, 1, POLLIN);
     seqPollFd.events = POLLIN;
     seqPollFd.revents = 0;
 
