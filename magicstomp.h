@@ -105,9 +105,6 @@ enum EffectParemeterOffsets
     EightBandDlyEffectLevelOffset = 0x10, //Two bytes
 };
 
-static constexpr int ub99SysExHeaderSize = 8;
-static const unsigned char ub99SysExHeader[ub99SysExHeaderSize] = { 0xF0, 0x43, 0x7D, 0x30, 0x55, 0x42, 0x39, 0x39 };
-
 #endif
 
 

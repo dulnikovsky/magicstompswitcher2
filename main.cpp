@@ -19,6 +19,9 @@ snd_seq_t *handle;
 snd_seq_addr_t selfInAddr, selfOutAddr;
 struct pollfd seqPollFd;
 
+static constexpr int ub99SysExHeaderSize = 8;
+static const unsigned char ub99SysExHeader[ub99SysExHeaderSize] = { 0xF0, 0x43, 0x7D, 0x30, 0x55, 0x42, 0x39, 0x39 };
+
 int subscribePort(snd_seq_t *handle, const snd_seq_addr_t &src, const snd_seq_addr_t &dest)
 {
     snd_seq_port_subscribe_t* subs;
