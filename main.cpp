@@ -4,6 +4,9 @@
 #include <array>
 #include <alsa/asoundlib.h>
 #include "magicstomp.h"
+#ifdef WITH_SSD1306_DISPLAY
+#include "ssd1306_display.h"
+#endif
 
 using namespace std;
 
@@ -287,12 +290,34 @@ bool hasRequestsPending()
     return false;
 }
 
+list<string> getPatchNameList()
+{
+    list<string> nameList;
+    for (auto const& [msaddr, dataVector] : msMap) {
+        if(dataVector.size() != PatchTotalLength*numOfPatches) {
+            //Patches are loading. Get last loaded patch
+            if(dataVector.size() < PatchTotalLength) {
+                continue;
+            } else {
+                nameList.push_back(move(string(reinterpret_cast<const char *>(&(dataVector.at((dataVector.size()-(PatchTotalLength - (dataVector.size() % PatchTotalLength)))+PatchName))), PatchNameLength)));
+            }
+        } else {
+            //Patches are fully loaded. Get current patch name
+            nameList.push_back(move(string(reinterpret_cast<const char *>(&(dataVector.at( currentProgram*PatchTotalLength+PatchName))), PatchNameLength)));
+        }
+    }
+    return nameList;
+}
+
 int main(int argc, char* argv[])
 {
     map<snd_seq_addr_t, vector<uint8_t>> sysExMap;
     uint8_t midiChannel{0};
     snd_seq_event_t *ev;
     int pollret;
+#ifdef WITH_SSD1306_DISPLAY
+    string i2cdevice;
+#endif
 
     cout << "Magicstomp Switcher" << endl;
     for (int i = 1; i < argc; ++i) {
@@ -309,8 +334,20 @@ int main(int argc, char* argv[])
                 cerr << "Error: " << arg << " requires an argument." << endl;
                 return 1;
             }
+        } else if (arg == "-d" || arg == "--i2cdevice") {
+            if (i + 1 < argc) {
+                i2cdevice = argv[++i];
+            } else {
+                cerr << "Error: " << arg << " requires an argument." << endl;
+                return 1;
+            }
         }
     }
+
+#ifdef WITH_SSD1306_DISPLAY
+    if(SSD1306Display_Init(i2cdevice.c_str()) == false)
+        cerr << "Error on SSD1306 i2c initialization: " << i2cdevice << endl;;
+#endif
 
     init();
     scan();
@@ -366,6 +403,9 @@ int main(int argc, char* argv[])
                                     if(! hasRequestsPending()) {
                                         snd_seq_stop_queue(handle, queue, NULL);
                                     }
+#ifdef WITH_SSD1306_DISPLAY
+                                    SSD1306Display_Draw(currentProgram+1, move(getPatchNameList()));                              ;
+#endif
                                     const char *firstCharNameAddr = reinterpret_cast<const char *>(&(*(msMapIt->second.cbegin()+(PatchTotalLength*(currentPatchInRequest -1)) + PatchName)));
                                     std::string patchName(firstCharNameAddr, PatchNameLength);
                                     cout << "Received Patch " << static_cast<uint32_t>(currentPatchInRequest) << " " << patchName << " from Magicstomp at ["
@@ -392,8 +432,10 @@ int main(int argc, char* argv[])
             } else if(ev->type==SND_SEQ_EVENT_PGMCHANGE) {
                 if((midiChannel==0 || (ev->data.raw8.d[0] & 0x0F)+1 == midiChannel) && ev->data.raw8.d[8] < numOfPatches) {
                     currentProgram = ev->data.raw8.d[8];
-                    cout << "Received Program Change " << currentProgram << endl;
                     sendAllToTemp();
+#ifdef WITH_SSD1306_DISPLAY
+                    SSD1306Display_Draw(currentProgram+1, move(getPatchNameList()));
+#endif
                 }
             } else if(ev->type==SND_SEQ_EVENT_PORT_START) {
                 snd_seq_client_info_t *cinfo;
@@ -434,6 +476,9 @@ int main(int argc, char* argv[])
             }
             else if(ev->type==SND_SEQ_EVENT_PORT_EXIT) {
                 if(msMap.erase(ev->data.addr) == 1) {
+#ifdef WITH_SSD1306_DISPLAY
+                    SSD1306Display_Draw(currentProgram+1, move(getPatchNameList()));
+#endif
                     cout << "Magicstomp disconnected[" << static_cast<uint32_t>(ev->data.addr.client)
                          << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
                 }
