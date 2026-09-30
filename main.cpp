@@ -473,6 +473,8 @@ int main(int argc, char* argv[])
                         //     subscribePort( handle, 14, 0, ev->data.addr.client, ev->data.addr.port);
                     }
                 }
+                snd_seq_client_info_free(cinfo);
+                snd_seq_port_info_free(pinfo);
             }
             else if(ev->type==SND_SEQ_EVENT_PORT_EXIT) {
                 if(msMap.erase(ev->data.addr) == 1) {
