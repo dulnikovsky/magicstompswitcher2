@@ -1,16 +1,20 @@
 
 #include "ssd1306_display.h"
 #include <ssd1306_i2c.h>
+#include <stdio.h>
 
 static ssd1306_i2c_t *handle{nullptr};
 static ssd1306_framebuffer_t *fbp{nullptr};
+static FILE *logFile{nullptr};
 
 bool SSD1306Display_Init(const char *i2c_dev)
 {
     if (handle != nullptr)
         return false;
 
-    handle = ssd1306_i2c_open(i2c_dev, 0x3c, 128, 64, NULL);
+    logFile = fopen("/dev/null", "w");
+
+    handle = ssd1306_i2c_open(i2c_dev, 0x3c, 128, 64, logFile);
     if (handle == nullptr)
         return false;
 
