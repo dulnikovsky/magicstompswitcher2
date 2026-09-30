@@ -441,8 +441,8 @@ int main(int argc, char* argv[])
                 snd_seq_client_info_t *cinfo;
                 snd_seq_port_info_t *pinfo;
 
-                snd_seq_client_info_alloca(&cinfo);
-                snd_seq_port_info_alloca(&pinfo);
+                snd_seq_client_info_malloc(&cinfo);
+                snd_seq_port_info_malloc(&pinfo);
 
                 snd_seq_get_any_client_info(handle, ev->data.addr.client, cinfo);
                 snd_seq_get_any_port_info(handle, ev->data.addr.client, ev->data.addr.port, pinfo);
