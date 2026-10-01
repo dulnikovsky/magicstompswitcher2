@@ -452,7 +452,14 @@ int main(int argc, char* argv[])
                         subscribePort(handle, selfOutAddr, ev->data.addr);
                         subscribePort(handle, ev->data.addr, selfInAddr);
                         auto retPair = msMap.insert(std::pair<snd_seq_addr_t, vector<uint8_t>>(ev->data.addr, vector<uint8_t>()));
-                        snd_seq_start_queue(handle, queue, NULL);
+                        snd_seq_queue_status_t *qstatus;
+                        snd_seq_queue_status_malloc(&qstatus);
+                        snd_seq_get_queue_status(handle, queue, qstatus);
+                        unsigned int statusStatus = snd_seq_queue_status_get_status(qstatus);
+                        if(statusStatus == 0) { // start queue only if not running yet
+                            snd_seq_start_queue(handle, queue, NULL);
+                        }
+                        snd_seq_queue_status_free(qstatus);
                         requestPatch( 0, selfOutAddr, retPair.first->first, 700000000);
                         cout << "Magicstomp connected[" << static_cast<uint32_t>(ev->data.addr.client)
                              << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
