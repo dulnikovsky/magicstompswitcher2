@@ -15,8 +15,19 @@ bool operator < (const snd_seq_addr_t& l, const snd_seq_addr_t& r)
     return pair(l.client, l.port) < std::pair(r.client, r.port);
 }
 
-map<snd_seq_addr_t, vector<uint8_t>> msMap;
-int queue;
+enum MsStatus {
+    INIT,
+    REQUESTING,
+    READY
+};
+
+struct MsStatusData {
+    MsStatus status{INIT};
+    vector<uint8_t> dataVec;
+};
+
+map<snd_seq_addr_t, MsStatusData> msMap;
+
 uint8_t currentProgram{0};
 snd_seq_t *handle;
 snd_seq_addr_t selfInAddr, selfOutAddr;
@@ -48,8 +59,6 @@ void init()
     snd_seq_open(&handle, "default", SND_SEQ_OPEN_DUPLEX, SND_SEQ_NONBLOCK);
     selfInAddr.client = selfOutAddr.client = snd_seq_client_id(handle);
     snd_seq_set_client_name(handle, "msswitcher");
-
-    queue = snd_seq_alloc_queue(handle);
 
     selfInAddr.port = snd_seq_create_simple_port(handle, "IN",
                                                       SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE, SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
@@ -103,7 +112,7 @@ void scan()
                 snd_seq_addr_t msAddr;
                 msAddr.client = clientId;
                 msAddr.port = snd_seq_port_info_get_port(pinfo);
-                msMap.insert(std::pair<snd_seq_addr_t, vector<unsigned char>>(msAddr, vector<unsigned char>()));
+                msMap.insert(std::pair<snd_seq_addr_t, MsStatusData>(msAddr, MsStatusData{}));
                 if(cap & (SND_SEQ_PORT_CAP_WRITE|SND_SEQ_PORT_CAP_SUBS_WRITE)) {
                     subscribePort(handle, selfOutAddr, msAddr);
                 }
@@ -134,7 +143,7 @@ void scan()
     }
 }
 
-int requestPatch(unsigned char index, const snd_seq_addr_t &src, const snd_seq_addr_t &dest, unsigned int delayNs)
+int requestPatch(unsigned char index, const snd_seq_addr_t &src, const snd_seq_addr_t &dest)
 {
     array<unsigned char, 10> request{0xF0, 0x43, 0x7D, 0x50, 0x55, 0x42, 0x30, 0x01, 0x00, 0xF7};
     request[8] = index;
@@ -147,11 +156,7 @@ int requestPatch(unsigned char index, const snd_seq_addr_t &src, const snd_seq_a
     snd_seq_ev_set_variable(&sendev, request.size(), (void *) &request.at(0));
     sendev.type=SND_SEQ_EVENT_SYSEX;
 
-    snd_seq_real_time_t delay_time;
-    delay_time.tv_sec = 0;
-    delay_time.tv_nsec = delayNs;
-
-    snd_seq_ev_schedule_real(&sendev, queue, 1, &delay_time);
+    snd_seq_ev_set_direct(&sendev);
 
     int ret;
     ret = snd_seq_event_output(handle, &sendev);
@@ -269,41 +274,29 @@ int sendPatchToTemp(const snd_seq_addr_t &src, const snd_seq_addr_t &dest,
 
 void sendAllToTemp()
 {
-    for (const auto& it: msMap)
-    {
-        if( it.second.size() != numOfPatches*PatchTotalLength)
-            continue; // Size does not match, means patches are not loaded properly
+    for (const auto& it: msMap) {
+        if( it.second.status != READY)
+            continue;
         sendPatchToTemp(selfOutAddr, it.first,
-                        it.second.data() + PatchTotalLength*currentProgram,
-                        it.second.data() + PatchTotalLength*currentProgram + PatchCommonLength);
-
+                        it.second.dataVec.data() + PatchTotalLength*currentProgram,
+                        it.second.dataVec.data() + PatchTotalLength*currentProgram + PatchCommonLength);
     }
-}
-
-bool hasRequestsPending()
-{
-    for (auto const& [msaddr, dataVector] : msMap) {
-        if(dataVector.size() != PatchTotalLength*numOfPatches) {
-            return true;
-        }
-    }
-    return false;
 }
 
 list<string> getPatchNameList()
 {
     list<string> nameList;
-    for (auto const& [msaddr, dataVector] : msMap) {
-        if(dataVector.size() != PatchTotalLength*numOfPatches) {
+    for (auto const& [msaddr, msStatusData] : msMap) {
+        if(msStatusData.dataVec.size() != PatchTotalLength*numOfPatches) {
             //Patches are loading. Get last loaded patch
-            if(dataVector.size() < PatchTotalLength) {
+            if(msStatusData.dataVec.size() < PatchTotalLength) {
                 continue;
             } else {
-                nameList.push_back(move(string(reinterpret_cast<const char *>(&(dataVector.at((dataVector.size()-(PatchTotalLength - (dataVector.size() % PatchTotalLength)))+PatchName))), PatchNameLength)));
+                nameList.push_back(move(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at((msStatusData.dataVec.size()-(PatchTotalLength - (msStatusData.dataVec.size() % PatchTotalLength)))+PatchName))), PatchNameLength)));
             }
         } else {
             //Patches are fully loaded. Get current patch name
-            nameList.push_back(move(string(reinterpret_cast<const char *>(&(dataVector.at( currentProgram*PatchTotalLength+PatchName))), PatchNameLength)));
+            nameList.push_back(move(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at( currentProgram*PatchTotalLength+PatchName))), PatchNameLength)));
         }
     }
     return nameList;
@@ -351,12 +344,7 @@ int main(int argc, char* argv[])
 
     init();
     scan();
-    if(hasRequestsPending()) {
-        snd_seq_start_queue(handle, queue, NULL);
-    }
-    for (auto const& [msaddr, dataVector] : msMap) {
-        requestPatch(0, selfOutAddr, msaddr, 0);
-    }
+
     while (1) {
 
         pollret = poll(&seqPollFd, 1, 500);
@@ -374,16 +362,16 @@ int main(int argc, char* argv[])
                     cout << "Unexpected event addess??" << endl;
                     continue;
                 }
-                auto sysExMapIt = sysExMap.find(ev->data.addr);
+                auto sysExMapIt = sysExMap.find(ev->source);
                 if(sysExMapIt == sysExMap.end()) {
-                    sysExMapIt = sysExMap.insert(std::pair<snd_seq_addr_t, vector<uint8_t>>(ev->data.addr, vector<uint8_t>())).first;
+                    sysExMapIt = sysExMap.insert(std::pair<snd_seq_addr_t, vector<uint8_t>>(ev->source, vector<uint8_t>())).first;
                 }
                 vector<uint8_t> &sysExDataVecRef = sysExMapIt->second;
                 sysExDataVecRef.insert(sysExDataVecRef.end(), static_cast<uint8_t *>(ev->data.ext.ptr), static_cast<uint8_t *>(ev->data.ext.ptr) + ev->data.ext.len);
 
                 if( (! sysExDataVecRef.empty()) && sysExDataVecRef.at(0) == 0xF0 && sysExDataVecRef.at(sysExDataVecRef.size()-1) == 0xF7) {
                     if(sysExDataVecRef.size() >= 13 && equal(sysExDataVecRef.cbegin(), sysExDataVecRef.cbegin()+ub99SysExHeaderSize, ub99SysExHeader)) {
-                        int8_t currentPatchInRequest = msMapIt->second.size() / PatchTotalLength;
+                        int8_t currentPatchInRequest = msMapIt->second.dataVec.size() / PatchTotalLength;
                         uint8_t checkSum = calcChecksum( & sysExDataVecRef.at(ub99SysExHeaderSize), sysExDataVecRef.size() - ub99SysExHeaderSize-2);
                         if(checkSum == sysExDataVecRef.at(sysExDataVecRef.size()-2)) {
                             if( sysExDataVecRef.at(8)==0x00 && sysExDataVecRef.at(9)==0x00) {
@@ -392,20 +380,18 @@ int main(int argc, char* argv[])
                                 } else if( sysExDataVecRef.at(10)==0x30 && sysExDataVecRef.at(11)==0x11 && (currentPatchInRequest-1)==sysExDataVecRef.at(12)) {
                                     //patch dump end message
                                     if(currentPatchInRequest >= (numOfPatches)) {
+                                        msMapIt->second.status = READY;
                                         sendPatchToTemp( selfOutAddr, msMapIt->first,
-                                                         msMapIt->second.data() + PatchTotalLength*currentProgram,
-                                                         msMapIt->second.data() + PatchTotalLength*currentProgram + PatchCommonLength);
+                                                         msMapIt->second.dataVec.data() + PatchTotalLength*currentProgram,
+                                                         msMapIt->second.dataVec.data() + PatchTotalLength*currentProgram + PatchCommonLength);
 
                                     } else {
-                                        requestPatch(currentPatchInRequest, selfOutAddr, msMapIt->first, 70000000);
-                                    }
-                                    if(! hasRequestsPending()) {
-                                        snd_seq_stop_queue(handle, queue, NULL);
+                                        requestPatch(currentPatchInRequest, selfOutAddr, msMapIt->first);
                                     }
 #ifdef WITH_SSD1306_DISPLAY
                                     SSD1306Display_Draw(currentProgram+1, move(getPatchNameList()));                              ;
 #endif
-                                    const char *firstCharNameAddr = reinterpret_cast<const char *>(&(*(msMapIt->second.cbegin()+(PatchTotalLength*(currentPatchInRequest -1)) + PatchName)));
+                                    const char *firstCharNameAddr = reinterpret_cast<const char *>(&(*(msMapIt->second.dataVec.cbegin()+(PatchTotalLength*(currentPatchInRequest -1)) + PatchName)));
                                     std::string patchName(firstCharNameAddr, PatchNameLength);
                                     cout << "Received Patch " << static_cast<uint32_t>(currentPatchInRequest) << " " << patchName << " from Magicstomp at ["
                                          << static_cast<uint32_t>(msMapIt->first.client) << ","
@@ -416,11 +402,11 @@ int main(int argc, char* argv[])
                                 if( sysExDataVecRef.at(10)==0x20) {
                                     if( sysExDataVecRef.at(11)==0x00 && sysExDataVecRef.at(12)==0x00 && length==PatchCommonLength) {
                                         // Patch common data;
-                                        msMapIt->second.insert(msMapIt->second.end(), &sysExDataVecRef.at(13), &sysExDataVecRef.at(13)+PatchCommonLength);
+                                        msMapIt->second.dataVec.insert(msMapIt->second.dataVec.end(), &sysExDataVecRef.at(13), &sysExDataVecRef.at(13)+PatchCommonLength);
                                     }
                                     else if( sysExDataVecRef.at(11)==0x01 && sysExDataVecRef.at(12)==0x00 && length==PatchEffectLength) {
                                         // Patch effect data;
-                                        msMapIt->second.insert(msMapIt->second.end(), &sysExDataVecRef.at(13), &sysExDataVecRef.at(13)+PatchEffectLength);
+                                        msMapIt->second.dataVec.insert(msMapIt->second.dataVec.end(), &sysExDataVecRef.at(13), &sysExDataVecRef.at(13)+PatchEffectLength);
                                     }
                                 }
                             }
@@ -451,16 +437,7 @@ int main(int argc, char* argv[])
                     if(findIter == msMap.end()) {
                         subscribePort(handle, selfOutAddr, ev->data.addr);
                         subscribePort(handle, ev->data.addr, selfInAddr);
-                        auto retPair = msMap.insert(std::pair<snd_seq_addr_t, vector<uint8_t>>(ev->data.addr, vector<uint8_t>()));
-                        snd_seq_queue_status_t *qstatus;
-                        snd_seq_queue_status_malloc(&qstatus);
-                        snd_seq_get_queue_status(handle, queue, qstatus);
-                        unsigned int statusStatus = snd_seq_queue_status_get_status(qstatus);
-                        if(statusStatus == 0) { // start queue only if not running yet
-                            snd_seq_start_queue(handle, queue, NULL);
-                        }
-                        snd_seq_queue_status_free(qstatus);
-                        requestPatch( 0, selfOutAddr, retPair.first->first, 700000000);
+                        msMap.insert(std::pair<snd_seq_addr_t, MsStatusData>(ev->data.addr, MsStatusData{}));
                         cout << "Magicstomp connected[" << static_cast<uint32_t>(ev->data.addr.client)
                              << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
                     }
@@ -481,8 +458,7 @@ int main(int argc, char* argv[])
                 }
                 snd_seq_client_info_free(cinfo);
                 snd_seq_port_info_free(pinfo);
-            }
-            else if(ev->type==SND_SEQ_EVENT_PORT_EXIT) {
+            } else if(ev->type==SND_SEQ_EVENT_PORT_EXIT) {
                 if(msMap.erase(ev->data.addr) == 1) {
 #ifdef WITH_SSD1306_DISPLAY
                     SSD1306Display_Draw(currentProgram+1, move(getPatchNameList()));
@@ -491,8 +467,11 @@ int main(int argc, char* argv[])
                          << ":" << static_cast<uint32_t>(ev->data.addr.port) << "]" << endl;
                 }
                 sysExMap.erase(ev->data.addr);
-                if(! hasRequestsPending()) {
-                    snd_seq_stop_queue(handle, queue, NULL);
+            } else if(ev->type == SND_SEQ_EVENT_SENSING) {
+                auto findIter = msMap.find(ev->source);
+                if(findIter != msMap.end() && findIter->second.status == INIT) {
+                    requestPatch( 0, selfOutAddr, findIter->first);
+                    findIter->second.status == REQUESTING;
                 }
             }
         }
