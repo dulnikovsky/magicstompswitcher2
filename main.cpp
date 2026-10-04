@@ -1,6 +1,7 @@
 #include <iostream>
 #include <map>
 #include <vector>
+#include <list>
 #include <array>
 #include <alsa/asoundlib.h>
 #include "magicstomp.h"
@@ -292,11 +293,11 @@ list<string> getPatchNameList()
             if(msStatusData.dataVec.size() < PatchTotalLength) {
                 continue;
             } else {
-                nameList.push_back(move(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at((msStatusData.dataVec.size()-(PatchTotalLength - (msStatusData.dataVec.size() % PatchTotalLength)))+PatchName))), PatchNameLength)));
+                nameList.push_back(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at((msStatusData.dataVec.size()-(PatchTotalLength - (msStatusData.dataVec.size() % PatchTotalLength)))+PatchName)), PatchNameLength)));
             }
         } else {
             //Patches are fully loaded. Get current patch name
-            nameList.push_back(move(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at( currentProgram*PatchTotalLength+PatchName))), PatchNameLength)));
+            nameList.push_back(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at( currentProgram*PatchTotalLength+PatchName)), PatchNameLength)));
         }
     }
     return nameList;
@@ -327,7 +328,9 @@ int main(int argc, char* argv[])
                 cerr << "Error: " << arg << " requires an argument." << endl;
                 return 1;
             }
-        } else if (arg == "-d" || arg == "--i2cdevice") {
+        }
+#ifdef WITH_SSD1306_DISPLAY
+        else if (arg == "-d" || arg == "--i2cdevice") {
             if (i + 1 < argc) {
                 i2cdevice = argv[++i];
             } else {
@@ -335,6 +338,7 @@ int main(int argc, char* argv[])
                 return 1;
             }
         }
+#endif
     }
 
 #ifdef WITH_SSD1306_DISPLAY
@@ -471,7 +475,7 @@ int main(int argc, char* argv[])
                 auto findIter = msMap.find(ev->source);
                 if(findIter != msMap.end() && findIter->second.status == INIT) {
                     requestPatch( 0, selfOutAddr, findIter->first);
-                    findIter->second.status == REQUESTING;
+                    findIter->second.status = REQUESTING;
                 }
             }
         }
