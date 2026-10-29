@@ -3,9 +3,33 @@
 #include <ssd1306_i2c.h>
 #include <stdio.h>
 
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+
 static ssd1306_i2c_t *handle{nullptr};
 static ssd1306_framebuffer_t *fbp{nullptr};
 static FILE *logFile{nullptr};
+static std::mutex mtx;
+static std::condition_variable cv;
+static bool updateDisplay = false;
+static bool shouldExit = false;
+static std::thread backgroundWorker;
+
+void workerThreadFunc() {
+    while (true) {
+        std::unique_lock<std::mutex> lock(mtx);
+
+        // Sleep until main thread signals conditionMet or shouldExit
+        cv.wait(lock, []{ return updateDisplay || shouldExit; });
+
+        if (shouldExit)
+            break;
+
+        ssd1306_i2c_display_update(handle, fbp);
+        updateDisplay = false;
+    }
+}
 
 bool SSD1306Display_Init(const char *i2c_dev)
 {
@@ -26,18 +50,17 @@ bool SSD1306Display_Init(const char *i2c_dev)
     ssd1306_i2c_display_clear(handle);
 
     ssd1306_framebuffer_draw_text(fbp, "Magicstomp", 10, 0, 24, SSD1306_FONT_DEFAULT, 4, NULL);
-    ssd1306_framebuffer_draw_text(fbp, "Switcher", 8, 0, 48, SSD1306_FONT_DEFAULT, 4, NULL);
+    ssd1306_framebuffer_draw_text(fbp, "Switcher 2.0", 8, 0, 48, SSD1306_FONT_DEFAULT, 4, NULL);
 
     ssd1306_i2c_display_update(handle, fbp);
+
+    backgroundWorker = std::thread(workerThreadFunc);
 
     return true;
 }
 
 bool SSD1306Display_Draw( unsigned char currentProgram, const std::list<std::string> &patchNameList)
 {
-    if(handle == nullptr) {
-        return false;
-    }
     ssd1306_framebuffer_clear(fbp);
 
     char prgArr[2];
@@ -54,6 +77,9 @@ bool SSD1306Display_Draw( unsigned char currentProgram, const std::list<std::str
         ssd1306_framebuffer_draw_text(fbp, patchName.c_str(), patchName.size(), x, y, SSD1306_FONT_DEFAULT, 4, &bbox);
         y += 16;
     }
-    ssd1306_i2c_display_update(handle, fbp);
+
+    updateDisplay = true;
+    cv.notify_one();
+
     return true;
 }

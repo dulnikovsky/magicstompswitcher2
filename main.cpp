@@ -13,7 +13,7 @@ using namespace std;
 
 bool operator < (const snd_seq_addr_t& l, const snd_seq_addr_t& r)
 {
-    return pair(l.client, l.port) < std::pair(r.client, r.port);
+    return pair(l.client, l.port) < pair(r.client, r.port);
 }
 
 enum MsStatus {
@@ -290,14 +290,17 @@ list<string> getPatchNameList()
     for (auto const& [msaddr, msStatusData] : msMap) {
         if(msStatusData.dataVec.size() != PatchTotalLength*numOfPatches) {
             //Patches are loading. Get last loaded patch
-            if(msStatusData.dataVec.size() < PatchTotalLength) {
+            if(msStatusData.dataVec.size() < PatchTotalLength)
                 continue;
-            } else {
-                nameList.push_back(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at((msStatusData.dataVec.size()-(PatchTotalLength - (msStatusData.dataVec.size() % PatchTotalLength)))+PatchName)), PatchNameLength)));
-            }
+
+            size_t lastIndex = msStatusData.dataVec.size() - 1;
+            int remeinder = lastIndex%PatchTotalLength;
+            const uint8_t *lastNameAddr = &(msStatusData.dataVec.at(lastIndex - ( remeinder==0?PatchTotalLength:remeinder) + PatchName));
+            nameList.push_back(string(reinterpret_cast<const char *>(lastNameAddr), PatchNameLength));
+
         } else {
             //Patches are fully loaded. Get current patch name
-            nameList.push_back(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at( currentProgram*PatchTotalLength+PatchName)), PatchNameLength)));
+            nameList.push_back(string(reinterpret_cast<const char *>(&(msStatusData.dataVec.at(currentProgram*PatchTotalLength + PatchName))), PatchNameLength));
         }
     }
     return nameList;
@@ -313,7 +316,7 @@ int main(int argc, char* argv[])
     string i2cdevice;
 #endif
 
-    cout << "Magicstomp Switcher" << endl;
+    cout << "Magicstomp Switcher 2.0 - (C) 2026 Robert Vetter" << endl;
     for (int i = 1; i < argc; ++i) {
         string arg = argv[i];
         if (arg == "-c" || arg == "--channel") {
@@ -393,7 +396,7 @@ int main(int argc, char* argv[])
                                         requestPatch(currentPatchInRequest, selfOutAddr, msMapIt->first);
                                     }
 #ifdef WITH_SSD1306_DISPLAY
-                                    SSD1306Display_Draw(currentProgram+1, move(getPatchNameList()));                              ;
+                                    SSD1306Display_Draw(currentProgram+1, move(getPatchNameList()));
 #endif
                                     const char *firstCharNameAddr = reinterpret_cast<const char *>(&(*(msMapIt->second.dataVec.cbegin()+(PatchTotalLength*(currentPatchInRequest -1)) + PatchName)));
                                     std::string patchName(firstCharNameAddr, PatchNameLength);
