@@ -49,7 +49,7 @@ This manual is for Linux distributions using apt package manager.
 
 ## How to build and install libssd1306 
 
-This section is only relevant if you want to build the magicstompswitcher2 with the SSD1306 support. Note: If using the display make sure i2c is enabled and the user running the app has the rights to access it.
+This section is only relevant if you want to build the magicstompswitcher2 with the SSD1306 display support. Note: If using the display make sure i2c is enabled and the user running the app has the rights to access it.
 
 1. Install required packages:
 
@@ -88,6 +88,38 @@ After the installation the app can be run in the terminal, just type magicstomps
   
 By default it's working in OMNI mode, means it takes PC messeges on every MIDI Channel. If you want to use a partucular MIDI channel only you need to run the app with the argument "-c" and the number of the MIDI Channel. For example to run it on MIDI channel 4:  
     ```magicstompswitcher2 -c 4```
+
+If using the SSD1306 display the i2c device file has to be privided as command line argument using the option "-d" For example:
+
+  ```magicstompswitcher2 -d /dev/i2c-0```
+
+
+## Run magicstompswitcher2 automatically using systemd
+
+In most cases the app will have to be run autamaticly after system start. Far this case systemd can be used. 
+
+1. Copy The file magicstompswitcher2.service from the systemd directory of the project to /etc/systemd/system:
+
+    ```sudo cp magicstompswitcher2.service /etc/systemd/system```
+
+2. Edit the file using an editor ( nano, vi or other ). Most likely you'll have to change the user and group settings in the file. ( The user and group "pi" are default users on a Raspberry Pi SBC). Also you can add options for midi channel or display to the "ExecStart" setting.
+
+3. Enable the service:
+
+    ```sudo systemctl enable magicstompswitcher2.service```
+
+4. Start the service:
+
+    ```sudo systemctl start magicstompswitcher2.service```
+
+Now the app will start autamaticly. you can check it's status using:  
+  
+```sudo systemctl status magicstompswitcher2.service```
+
+And have a look and the logs:
+
+```journalctl -u magicstompswitcher2.service```
+
 
 
 

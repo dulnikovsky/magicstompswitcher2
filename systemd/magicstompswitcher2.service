@@ -1,10 +1,9 @@
 [Unit]
-Description=MagicstompSwitcher
+Description=MagicstompSwitcher2
 After=multi-user.target
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/environment
 ExecStart=/usr/local/bin/magicstompswitcher2
 KillMode=process
 User=pi
