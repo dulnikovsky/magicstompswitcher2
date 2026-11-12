@@ -2,7 +2,7 @@
 
 ## Preface
 
-The purpose of this application is to be able to switch patches of the YAMAHA Magicstomp using MIDI Program Change messages. The Magicstomp does not support this, it only supports MIDI SysEx messages, mainly for editing. Thus an application mapping Program Change messages to SysEx is neccessary. 
+The purpose of this application is to be able to switch patches of the YAMAHA Magicstomp using MIDI Program Change messages. The Magicstomp does not support this, it only supports MIDI SysEx messages, mainly for editing. Thus an application mapping Program Change messages to SysEx is neccessary.  The magicstompswitcher2 supports multiple Magicstomps, you can control as meny of them as you want! (I wish I had written this app while Allan Holdsworth was still with us, as he used six Magicstomps!).
 
 This application is for Linux. Means: Every Linux system, from a PC to small Single Board Computer like Raspberry Pi can be used as hardware in order for this application to run. As there are many different distributions the easest way is to compile it on the target computer directly from the sources. It's not that hard, you only need to be familiar with Linux terminal and command prompt like bash. The application is a pure console application, however it can optionally be used with a 128x64 SSD1306 display connected via i2c.
 
@@ -79,10 +79,16 @@ This section is only relevant if you want to build the magicstompswitcher2 with 
 
     ```sudo ldconfig```
 
-6. Go back to previous directory:
+6. Go back to the previous directory:
 
     ```cd ..```
 
- 
+## How to use magicstompswitcher2 
+After the installation the app can be run in the terminal, just type magicstompswitcher2. After the start it scans the connected Magicstomps and copies the user patches from them into the memory. It takes about one minute. After that its ready to use. Any incoming Program Change masseges from a connected hardware MIDI controller will result in loading according user patch into the connected Magicstomp(s).  
+  
+By default it's working in OMNI mode, means it takes PC messeges on every MIDI Channel. If you want to use a partucular MIDI channel only you need to run the app with the argument "-c" and the number of the MIDI Channel. For example to run it on MIDI channel 4:  
+    ```magicstompswitcher2 -c 4```
+
+
 
 
